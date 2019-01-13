@@ -105,7 +105,7 @@ class Prophet6(MIDIDevice):
             control_map=None, input_routes=None):
         super().__init__(channel=channel or Prophet6.DEFAULT_CHANNEL, 
                 outport=outport, inport=inport, input_routes=input_routes)
-        self.control_map = control_map or DEFAULT_CONTROL_MAP
+        self.control_map = control_map or Prophet6.DEFAULT_CONTROL_MAP
         self.control_parser = {v: k for k, v in self.control_map.items()}
         self.control_state = {}
 
@@ -117,8 +117,17 @@ class Prophet6(MIDIDevice):
         imap = zip(['osc_1_freq', 'osc_1_level', 'osc_1_shape',
             'osc_1_pulse_width'], [freq, level, shape, pulse_width])
         for m in imap:
-            self.control_state[m[0]] = m[1]
             self.control_change(self.control_map[m[0]], m[1])
+
+    def osc_2(self, freq, fine, level, shape, pulse_width):
+        imap = zip(['osc_2_freq', 'osc_2_freq_fine', 'osc_2_level', 'osc_2_shape',
+            'osc_2_pulse_width'], [freq, fine, level, shape, pulse_width])
+        for m in imap:
+            self.control_change(self.control_map[m[0]], m[1])
+    
+    def control_change(self, control, value):
+        self.control_state[self.control_parser[control]] = value
+        super().control_change(control, value)
 
 
 class TX802(MIDIDevice):
