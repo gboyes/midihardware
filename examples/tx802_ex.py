@@ -21,4 +21,3 @@ with mido.open_output(ops[TX_PORT]) as outport:
         outport.reset()
     except KeyboardInterrupt:
         outport.reset()
-        print('bye')

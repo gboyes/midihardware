@@ -1,20 +1,22 @@
 import threading
 import mido
 
+from .utils import EqualTemperament
 
-class MIDIDevice(object):
-    def __init__(self, channel=None, outport=None, inport=None, input_routes=None):
+
+class MIDIOutputDevice():
+    def __init__(self, channel=None, outport=None, tuning=None):
         self.channel = channel
         self.outport = outport
-        self.inport = inport
-        self.input_routes = input_routes or {}
-
-        if self.inport:
-            self.inport.callback = self.input_handler
+        self.tuning = tuning or EqualTemperament()
 
     def send(self, msg):
         _msg = msg.copy(channel=self.channel)
         self.outport.send(_msg)
+
+    def clock(self):
+        msg = mido.Message('clock')
+        self.outport.send(msg)
 
     def make_note(self, note, velocity, duration):
         self.note_on(note, velocity)
@@ -54,11 +56,20 @@ class MIDIDevice(object):
                 program=program)
         self.outport.send(msg)
 
-    def input_handler(self, msg):
+
+class MIDIInputDevice():
+    def __init__(self, inport=None, routes=None):
+        self.inport = inport
+        self.routes = routes or {}
+        if self.inport:
+            self.inport.callback = self.input_processor
+
+    def input_processor(self, msg):
+        # override this method for input processing
         pass
 
 
-class DRM1mk3(MIDIDevice):
+class DRM1mk3(MIDIOutputDevice):
     DEFAULT_CHANNEL = 9
     DEFAULT_INSTRUMENT_MAP = {'kick': 36, 'drum_1': 48, 'drum_2': 41,
                        'multi': 58, 'snare': 40, 'hi_hat_1': 49,
@@ -66,15 +77,18 @@ class DRM1mk3(MIDIDevice):
                        'clap': 39}
 
     def __init__(self, channel=None, outport=None, instrument_map=None):
-        super().__init__(channel=channel or DRM1mk3.DEFAULT_CHANNEL, 
+        MIDIOutputDevice.__init__(self, channel=channel or DRM1mk3.DEFAULT_CHANNEL, 
                 outport=outport)
-        self.instrument_map = instrument_map or DRM1mk3.DEFAULT_INSTRUMENT_MAP
+        self._instrument_map = instrument_map or DRM1mk3.DEFAULT_INSTRUMENT_MAP
 
     def trigger(self, instrument, velocity):
-        self.note_on(self.instrument_map[instrument], velocity)
+        self.note_on(self._instrument_map[instrument], velocity)
+
+    def instruments(self):
+        return self._instrument_map.keys()
 
 
-class Prophet6(MIDIDevice):
+class Prophet6(MIDIOutputDevice, MIDIInputDevice):
     DEFAULT_CHANNEL = 5
     DEFAULT_CONTROL_MAP = {'bank_select_msb': 0, 'mod_wheel': 1,
             'bpm': 3, 'foot_controller': 4, 'glide_mode': 5, 
@@ -101,60 +115,68 @@ class Prophet6(MIDIDevice):
             'all_notes_off': 123, 'omni_mode_off': 124, 'omni_mode_on': 125,
             'mono_mode_on': 126, 'poly_mode_on': 127}
 
-    def __init__(self, channel=None, outport=None, inport=None,
-            control_map=None, input_routes=None):
-        super().__init__(channel=channel or Prophet6.DEFAULT_CHANNEL, 
-                outport=outport, inport=inport, input_routes=input_routes)
-        self.control_map = control_map or Prophet6.DEFAULT_CONTROL_MAP
-        self.control_parser = {v: k for k, v in self.control_map.items()}
+    def __init__(self, channel=None, outport=None, tuning=None, inport=None,
+            routes=None, control_map=None):
+        MIDIOutputDevice.__init__(self, channel=channel or Prophet6.DEFAULT_CHANNEL, 
+                outport=outport, tuning=tuning)
+        MIDIInputDevice.__init__(self, inport=inport, routes=routes)
+
+        self._control_map = control_map or Prophet6.DEFAULT_CONTROL_MAP
+        self._control_parser = {v: k for k, v in self._control_map.items()}
+
         self.control_state = {}
 
-    def input_handler(self, msg):
+    def controller(self, name):
+        return self._control_map.get(name)
+
+    def input_processor(self, msg):
         if msg.type == 'control_change':
-            self.control_state[self.control_parser[msg.control]] = msg.value
+            self.control_state[self._control_parser[msg.control]] = msg.value
 
     def osc_1(self, freq, level, shape, pulse_width):
         imap = zip(['osc_1_freq', 'osc_1_level', 'osc_1_shape',
             'osc_1_pulse_width'], [freq, level, shape, pulse_width])
         for m in imap:
-            self.control_change(self.control_map[m[0]], m[1])
+            self.control_change(self._control_map[m[0]], m[1])
 
     def osc_2(self, freq, fine, level, shape, pulse_width):
         imap = zip(['osc_2_freq', 'osc_2_freq_fine', 'osc_2_level', 'osc_2_shape',
             'osc_2_pulse_width'], [freq, fine, level, shape, pulse_width])
         for m in imap:
-            self.control_change(self.control_map[m[0]], m[1])
+            self.control_change(self._control_map[m[0]], m[1])
     
     def control_change(self, control, value):
-        self.control_state[self.control_parser[control]] = value
+        self.control_state[self._control_parser[control]] = value
         super().control_change(control, value)
 
 
-class TX802(MIDIDevice):
+class TX802(MIDIOutputDevice):
     DEFAULT_CHANNEL = 7
     DEFAULT_CONTROL_MAP = {'modulation_wheel': 1, 'breath_control': 2,
             'foot_control': 4, 'portamento_time': 5, 'volume': 7,
             'sustain_switch': 64, 'portamento_switch': 65}
-    def __init__(self, channel=None, outport=None, control_map=None):
+    def __init__(self, channel=None, outport=None, tuning=None, control_map=None):
         super().__init__(channel=channel or TX802.DEFAULT_CHANNEL, 
-                outport=outport)
-        self.control_map = control_map or TX802.DEFAULT_CONTROL_MAP
+                outport=outport, tuning=tuning)
+        self._control_map = control_map or TX802.DEFAULT_CONTROL_MAP
 
 
-class MicroKORG(MIDIDevice):
+class MicroKORG(MIDIOutputDevice, MIDIInputDevice):
     DEFAULT_CHANNEL = 0
     def __init__(self, channel=None, outport=None, inport=None, 
-            input_routes=None):
-        super().__init__(channel=channel or MicroKORG.DEFAULT_CHANNEL, 
-                outport=outport, inport=inport, input_routes=input_routes)
+            routes=None):
+        MIDIOutputDevice.__init__(self, channel=channel or MicroKORG.DEFAULT_CHANNEL, 
+                outport=outport)
+        MIDIInputDevice.__init__(self, inport=inport, routes=routes)
 
 
-class OctatrackMk1(MIDIDevice):
+class OctatrackMk1(MIDIOutputDevice, MIDIInputDevice):
     DEFAULT_CHANNEL = 10
     def __init__(self, channel=None, outport=None, inport=None,
-            control_map=None, input_routes=None):
-        super().__init__(channel=channel or OctatrackMk1.DEFAULT_CHANNEL, 
-                outport=outport, inport=inport, input_routes=input_routes)
+            routes=None):
+        MIDIOutputDevice.__init__(self, channel=channel or OctatrackMk1.DEFAULT_CHANNEL,
+                outport=outport)
+        MIDIInputDevice.__init__(self, inport=inport, routes=routes)
 
     def stop_sequencer(self):
         self.note_on(33, 127)

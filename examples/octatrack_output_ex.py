@@ -40,4 +40,3 @@ with mido.open_output(ops[OCT_PORT]) as outport:
 
     except KeyboardInterrupt:
         outport.reset()
-        print('bye')

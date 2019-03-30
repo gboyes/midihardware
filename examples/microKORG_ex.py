@@ -19,4 +19,3 @@ with mido.open_output(ops[PROPHET_PORT]) as outport:
         outport.reset()
     except KeyboardInterrupt:
         outport.reset()
-        print('bye')

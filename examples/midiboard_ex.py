@@ -17,4 +17,3 @@ with mido.open_output(ops[PROPHET_PORT]) as outport:
                 prophet.send(msg)
         except KeyboardInterrupt:
             outport.reset()
-            print('bye')
